@@ -1,0 +1,154 @@
+- name: Create the Feed server setup
+  hosts: {{ host_name }} 
+  become: true
+  become_method: sudo
+
+  tasks:
+  - name: Setting hostname to feed....
+    hostname:
+      name: {{ host }}
+
+  - name: Installing  python3, pip, setuptools, libmysqlclient-dev...
+    apt:
+      name: [python3-pip, python3-dev, python-setuptools, libmysqlclient-dev]
+      update_cache: yes
+
+  - name: Installing postgresql, postgresql-contrib,psycopg2...
+    apt:
+      name: [postgresql, postgresql-contrib, python3-psycopg2, python-psycopg2]
+
+  - name: Installing Nginx and gunicorn
+    apt:
+      name: [nginx,gunicorn]
+
+  - name: Installing Curl...
+    apt:
+      name: curl
+
+  - name: Setting up Postgres database...
+    become: yes
+    become_user: postgres
+    postgresql_db:
+      db: {{ dbname}}
+      encoding: "UTF-8"
+      lc_collate: "en_US.UTF-8"
+      lc_ctype: "en_US.UTF-8"
+      template: "template0"
+      state: present
+
+  - name: Granting access for database to user
+    become: yes
+    become_user: postgres
+    postgresql_user:
+      db: {{ dbname }}
+      user: {{ user }}
+      password: {{ password}}
+      role_attr_flags: "CREATEDB,SUPERUSER"
+      state: present
+
+  - name: Ensuring postgres is running..
+    service: name=postgresql state=started enabled=yes
+
+  - name: Installing  python virtualenv..
+    apt:
+      name: [python3-venv]
+
+  - name: Cloning the project repo ...
+    become: false
+    git:
+      repo: {{ git_repo}}
+      dest: /path/to/project
+      accept_hostkey: true
+
+
+  - name: Ensuring python virtualenv exist...
+    command: "/usr/bin/python3 -m venv {{ venv_path }}"
+    args:
+      creates: {{ venv_path }}
+    become: false
+
+  - name: Installing dependencies..
+    become: false
+    pip:
+      requirements: /path/to/requirements.txt
+      virtualenv: {{ venv_path}}
+
+  - name: Setting up application server- Making migration file...
+    django_manage:
+      command: makemigrations
+      app_path: /path/to/manage.py
+      virtualenv: {{ venv_path}}
+
+  - name: Setting up application server - migrating...
+    django_manage:
+      command: migrate
+      app_path: /path/to/app/manage.py
+      virtualenv: {{ venv_path}}
+      
+  - name: Setting up application server- collecting static files...
+    django_manage:
+      command: collectstatic
+      app_path: /path/to/manage.py
+      virtualenv: {{ venv_path}}  
+
+  - name: Copying configuration service of gunicorn..
+    template:
+      src: ./gunicorn.service.j2
+      dest: "/etc/systemd/system/gunicorn.service"
+
+  - name: Copying configuration socket of gunicorn...
+    template:
+      src: ./gunicorn.socket.j2
+      dest: "/etc/systemd/system/gunicorn.socket"
+
+  - name: Starting the gunicorn service..
+    systemd:
+      name: gunicorn
+      daemon_reload: yes
+      enabled: yes
+      state: started
+
+  - name: Copying configuration Nginx
+    template:
+      src: ./nginx.j2
+      dest: "/etc/nginx/sites-available/project"
+
+  - name: Creating a Sym link of sites available to enabled  Nginx...
+    file:
+      src: /etc/nginx/sites-available/project
+      dest: /etc/nginx/sites-enabled/project
+      state: link
+
+  - name: Deleting default vhost...
+    action: file path=/etc/nginx/sites-enabled/default state=absent
+
+  - name: Restarting the gunicorn service...
+    systemd:
+      name: gunicorn
+      daemon_reload: yes
+      enabled: yes
+      state: restarted
+
+  - name: Restarting the nginx service...
+    systemd:
+      name: nginx
+      daemon_reload: yes
+      enabled: yes
+      state: restarted
+
+  - name: Setting up certbot ssl - installling software-properties-common..
+    apt:
+      name: software-properties-common
+    become: yes 
+
+  - name: setting up certbot ssl - adding universe
+    command: "sudo add-apt-repository universe"
+ 
+  - name: setting up certbot ssl - adding ppa ppa:certbot/certbot..
+    apt_repository:
+      repo: ppa:certbot/certbot 
+  
+  - name: Installing certbot..
+    apt:
+      name: [certbot, python-certbot-nginx]
+      update_cache: yes
