@@ -2,7 +2,7 @@
 Run the command:
 ansible-plabook plabook.yml -i hosts -u ubuntu
  
- And wait were setting up your machine..
+ And wait we're setting up your machine..
 
  Once it is ready..
 
